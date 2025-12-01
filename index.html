@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>London Minecraft 3D Prototype</title>
+  <title>London Minecraft 3D – Simple</title>
   <style>
     html, body {
       margin: 0;
@@ -23,57 +23,23 @@
       z-index: 10;
       border-radius: 4px;
     }
-    #blocker {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0, 0, 0, 0.7);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      z-index: 20;
-      text-align: center;
-      cursor: pointer;
-      flex-direction: column;
-    }
-    #blocker h1 {
-      margin-bottom: 10px;
-    }
-    #blocker p {
-      max-width: 400px;
-      font-size: 14px;
-    }
   </style>
 </head>
 <body>
 <div id="info">
-  London Minecraft 3D<br/>
-  W/A/S/D: Bewegen · Maus: Umschauen · Space: Springen · ESC: Maus freigeben
+  London Minecraft 3D (Prototype)<br/>
+  Maus/Touch: drehen & zoomen · W/A/S/D: über die Straßen bewegen
 </div>
 
-<div id="blocker">
-  <h1>London Minecraft 3D</h1>
-  <p>Klicke, um zu starten.<br/>Verwende W/A/S/D zum Laufen, Maus zum Umschauen, Space zum Springen.</p>
-</div>
-
+<!-- Three.js + OrbitControls -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.159.0/examples/js/controls/PointerLockControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.159.0/examples/js/controls/OrbitControls.js"></script>
 <script>
-  // Basis-Setup
   let camera, scene, renderer, controls;
-  let objects = []; // Kollisionsobjekte (Blöcke)
-  let moveForward = false;
-  let moveBackward = false;
-  let moveLeft = false;
-  let moveRight = false;
-  let canJump = false;
+  let objects = [];
+  let keys = { w: false, a: false, s: false, d: false };
 
   let prevTime = performance.now();
-  const velocity = new THREE.Vector3();
-  const direction = new THREE.Vector3();
 
   init();
   animate();
@@ -91,36 +57,31 @@
     scene.fog = new THREE.Fog(0x000010, 10, 150);
 
     // Kamera
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
+    camera.position.set(35, 25, 35);
+
+    // Orbit-Steuerung (Maus/Touch)
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 5, 0);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.enablePan = false; // Pan machen wir via WASD
+    controls.maxPolarAngle = Math.PI / 2.05; // nicht unter Boden schauen
 
     // Licht
-    const ambient = new THREE.AmbientLight(0x8888aa, 0.6);
+    const ambient = new THREE.AmbientLight(0x8888aa, 0.7);
     scene.add(ambient);
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
     dirLight.position.set(50, 100, -20);
     scene.add(dirLight);
 
-    // PointerLock Controls (Ego-Perspektive)
-    controls = new THREE.PointerLockControls(camera, document.body);
-
-    const blocker = document.getElementById('blocker');
-    blocker.addEventListener('click', function () {
-      controls.lock();
-    });
-
-    controls.addEventListener('lock', function () {
-      blocker.style.display = 'none';
-    });
-
-    controls.addEventListener('unlock', function () {
-      blocker.style.display = 'flex';
-    });
-
-    scene.add(controls.getObject());
-    controls.getObject().position.set(0, 5, 20);
-
-    // Boden als Würfel-Gitter (Minecraft-Style)
+    // Boden / Straßen im Minecraft-Style
     const groundSize = 40;
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 
@@ -131,85 +92,42 @@
     for (let x = -groundSize; x <= groundSize; x++) {
       for (let z = -groundSize; z <= groundSize; z++) {
         let mat = groundMaterial;
-        // einfache "Straße" durch London (Zentralachse z)
+
+        // Hauptstraße in der Mitte (x ~ 0)
         if (Math.abs(x) < 3) mat = streetMaterial;
-        // Gehwege rechts/links
-        if ((Math.abs(x) === 3 || Math.abs(x) === 4) && Math.abs(z) < groundSize) mat = sidewalkMaterial;
+        // Gehwege daneben
+        if ((Math.abs(x) === 3 || Math.abs(x) === 4) && Math.abs(z) < groundSize) {
+          mat = sidewalkMaterial;
+        }
 
         const cube = new THREE.Mesh(boxGeo, mat);
         cube.position.set(x, 0, z);
-        cube.castShadow = false;
         cube.receiveShadow = true;
         scene.add(cube);
         objects.push(cube);
       }
     }
 
-    // Ein paar "Blocks" als London-Häuser (Voxel-Hochhäuser)
-    createBlockBuilding(-10, 1, -10, 6, 10, 6, 0x333366); // „Bürohaus“
-    createBlockBuilding(10, 1, -5, 6, 8, 6, 0x553333);   // Backstein
-    createBlockBuilding(-5, 1, 15, 4, 7, 4, 0x444444);   // Kleiner Block
-    createBigBenLike(0, 1, -25);                         // Big-Ben-wie Turm
+    // Gebäude-Cluster (London-Blocks)
+    createBlockBuilding(-10, 1, -10, 6, 10, 6, 0x333366); // Hochhaus
+    createBlockBuilding(10, 1, -5, 6, 8, 6, 0x553333);   // Backsteinhaus
+    createBlockBuilding(-5, 1, 15, 4, 7, 4, 0x444444);   // kleiner Block
+    createBigBenLike(0, 1, -25);                         // „Big Ben“-Turm light
 
-    // Ein paar "Neon-Schilder" für Night-London
+    // Neon-Schilder für Night-Vibe
     createNeonSign(-10, 7, -8, 4, 2, 0x00aaff);
     createNeonSign(10, 6, -3, 3, 1.5, 0xff0077);
 
-    // "Nebel-Scheinwerfer" für London-Nacht
+    // „Stadt-Lichtkegel“
     const spot = new THREE.SpotLight(0xffddaa, 0.4, 100, Math.PI / 6, 0.5, 1);
     spot.position.set(0, 20, 0);
     scene.add(spot);
 
-    // Input Events
-    const onKeyDown = function (event) {
-      switch (event.code) {
-        case 'ArrowUp':
-        case 'KeyW':
-          moveForward = true;
-          break;
-        case 'ArrowLeft':
-        case 'KeyA':
-          moveLeft = true;
-          break;
-        case 'ArrowDown':
-        case 'KeyS':
-          moveBackward = true;
-          break;
-        case 'ArrowRight':
-        case 'KeyD':
-          moveRight = true;
-          break;
-        case 'Space':
-          if (canJump === true) velocity.y += 8;
-          canJump = false;
-          break;
-      }
-    };
+    // Keyboard Events
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
 
-    const onKeyUp = function (event) {
-      switch (event.code) {
-        case 'ArrowUp':
-        case 'KeyW':
-          moveForward = false;
-          break;
-        case 'ArrowLeft':
-        case 'KeyA':
-          moveLeft = false;
-          break;
-        case 'ArrowDown':
-        case 'KeyS':
-          moveBackward = false;
-          break;
-        case 'ArrowRight':
-        case 'KeyD':
-          moveRight = false;
-          break;
-      }
-    };
-
-    document.addEventListener('keydown', onKeyDown, false);
-    document.addEventListener('keyup', onKeyUp, false);
-
+    // Resize
     window.addEventListener('resize', onWindowResize);
   }
 
@@ -248,7 +166,7 @@
       }
     }
 
-    // "Uhr" – helle Blöcke ringsum auf einer Ebene
+    // Uhr rundherum (helle Blöcke)
     const clockY = startY + 10;
     for (let x = cx - 1; x <= cx + 1; x++) {
       const cubeFront = new THREE.Mesh(geo, clockMat);
@@ -277,14 +195,30 @@
   function createNeonSign(x, y, z, w, h, color) {
     const geo = new THREE.BoxGeometry(w, h, 0.3);
     const mat = new THREE.MeshBasicMaterial({
-      color: color,
-      emissive: color,
-      emissiveIntensity: 1
+      color: color
     });
     const sign = new THREE.Mesh(geo, mat);
     sign.position.set(x, y, z);
     scene.add(sign);
     objects.push(sign);
+  }
+
+  function onKeyDown(e) {
+    switch (e.code) {
+      case 'KeyW': keys.w = true; break;
+      case 'KeyA': keys.a = true; break;
+      case 'KeyS': keys.s = true; break;
+      case 'KeyD': keys.d = true; break;
+    }
+  }
+
+  function onKeyUp(e) {
+    switch (e.code) {
+      case 'KeyW': keys.w = false; break;
+      case 'KeyA': keys.a = false; break;
+      case 'KeyS': keys.s = false; break;
+      case 'KeyD': keys.d = false; break;
+    }
   }
 
   function onWindowResize() {
@@ -298,37 +232,28 @@
 
     const time = performance.now();
     const delta = (time - prevTime) / 1000;
-
-    if (controls.isLocked) {
-      // Bewegung & Physik
-      velocity.x -= velocity.x * 10.0 * delta;
-      velocity.z -= velocity.z * 10.0 * delta;
-      velocity.y -= 9.8 * 5.0 * delta; // Gravitation
-
-      direction.z = Number(moveForward) - Number(moveBackward);
-      direction.x = Number(moveRight) - Number(moveLeft);
-      direction.normalize(); // wichtig, wenn beide Tasten gedrückt
-
-      const speed = 25.0;
-      if (moveForward || moveBackward) velocity.z -= direction.z * speed * delta;
-      if (moveLeft || moveRight) velocity.x -= direction.x * speed * delta;
-
-      // Position updaten
-      controls.moveRight(-velocity.x * delta);
-      controls.moveForward(-velocity.z * delta);
-
-      controls.getObject().position.y += velocity.y * delta;
-
-      // "Boden"-Kollision
-      if (controls.getObject().position.y < 2) {
-        velocity.y = 0;
-        controls.getObject().position.y = 2;
-        canJump = true;
-      }
-    }
-
     prevTime = time;
 
+    // WASD bewegt Kamera & Target entlang der Straße
+    const speed = 20;
+    let moveX = 0;
+    let moveZ = 0;
+
+    if (keys.w) moveZ -= speed * delta;
+    if (keys.s) moveZ += speed * delta;
+    if (keys.a) moveX -= speed * delta;
+    if (keys.d) moveX += speed * delta;
+
+    if (moveX !== 0 || moveZ !== 0) {
+      // Bewegung im Weltkoordinatensystem (Straßenrichtung: Z, Querstraße: X)
+      camera.position.x += moveX * Math.cos(0) + moveZ * Math.sin(0);
+      camera.position.z += moveZ * Math.cos(0) - moveX * Math.sin(0);
+
+      controls.target.x += moveX * Math.cos(0) + moveZ * Math.sin(0);
+      controls.target.z += moveZ * Math.cos(0) - moveX * Math.sin(0);
+    }
+
+    controls.update();
     renderer.render(scene, camera);
   }
 </script>
