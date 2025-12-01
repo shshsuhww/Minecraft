@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>London Minecraft 3D Prototype</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      background: #000;
+      font-family: Arial, sans-serif;
+    }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      background: rgba(0,0,0,0.5);
+      padding: 8px 12px;
+      font-size: 12px;
+      z-index: 10;
+      border-radius: 4px;
+    }
+    #blocker {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      z-index: 20;
+      text-align: center;
+      cursor: pointer;
+      flex-direction: column;
+    }
+    #blocker h1 {
+      margin-bottom: 10px;
+    }
+    #blocker p {
+      max-width: 400px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+<div id="info">
+  London Minecraft 3D<br/>
+  W/A/S/D: Bewegen · Maus: Umschauen · Space: Springen · ESC: Maus freigeben
+</div>
+
+<div id="blocker">
+  <h1>London Minecraft 3D</h1>
+  <p>Klicke, um zu starten.<br/>Verwende W/A/S/D zum Laufen, Maus zum Umschauen, Space zum Springen.</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.159.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.159.0/examples/js/controls/PointerLockControls.js"></script>
+<script>
+  // Basis-Setup
+  let camera, scene, renderer, controls;
+  let objects = []; // Kollisionsobjekte (Blöcke)
+  let moveForward = false;
+  let moveBackward = false;
+  let moveLeft = false;
+  let moveRight = false;
+  let canJump = false;
+
+  let prevTime = performance.now();
+  const velocity = new THREE.Vector3();
+  const direction = new THREE.Vector3();
+
+  init();
+  animate();
+
+  function init() {
+    // Renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    document.body.appendChild(renderer.domElement);
+
+    // Szene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000010);
+    scene.fog = new THREE.Fog(0x000010, 10, 150);
+
+    // Kamera
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+    // Licht
+    const ambient = new THREE.AmbientLight(0x8888aa, 0.6);
+    scene.add(ambient);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    dirLight.position.set(50, 100, -20);
+    scene.add(dirLight);
+
+    // PointerLock Controls (Ego-Perspektive)
+    controls = new THREE.PointerLockControls(camera, document.body);
+
+    const blocker = document.getElementById('blocker');
+    blocker.addEventListener('click', function () {
+      controls.lock();
+    });
+
+    controls.addEventListener('lock', function () {
+      blocker.style.display = 'none';
+    });
+
+    controls.addEventListener('unlock', function () {
+      blocker.style.display = 'flex';
+    });
+
+    scene.add(controls.getObject());
+    controls.getObject().position.set(0, 5, 20);
+
+    // Boden als Würfel-Gitter (Minecraft-Style)
+    const groundSize = 40;
+    const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+
+    const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x224422 });
+    const streetMaterial = new THREE.MeshLambertMaterial({ color: 0x111111 });
+    const sidewalkMaterial = new THREE.MeshLambertMaterial({ color: 0x555555 });
+
+    for (let x = -groundSize; x <= groundSize; x++) {
+      for (let z = -groundSize; z <= groundSize; z++) {
+        let mat = groundMaterial;
+        // einfache "Straße" durch London (Zentralachse z)
+        if (Math.abs(x) < 3) mat = streetMaterial;
+        // Gehwege rechts/links
+        if ((Math.abs(x) === 3 || Math.abs(x) === 4) && Math.abs(z) < groundSize) mat = sidewalkMaterial;
+
+        const cube = new THREE.Mesh(boxGeo, mat);
+        cube.position.set(x, 0, z);
+        cube.castShadow = false;
+        cube.receiveShadow = true;
+        scene.add(cube);
+        objects.push(cube);
+      }
+    }
+
+    // Ein paar "Blocks" als London-Häuser (Voxel-Hochhäuser)
+    createBlockBuilding(-10, 1, -10, 6, 10, 6, 0x333366); // „Bürohaus“
+    createBlockBuilding(10, 1, -5, 6, 8, 6, 0x553333);   // Backstein
+    createBlockBuilding(-5, 1, 15, 4, 7, 4, 0x444444);   // Kleiner Block
+    createBigBenLike(0, 1, -25);                         // Big-Ben-wie Turm
+
+    // Ein paar "Neon-Schilder" für Night-London
+    createNeonSign(-10, 7, -8, 4, 2, 0x00aaff);
+    createNeonSign(10, 6, -3, 3, 1.5, 0xff0077);
+
+    // "Nebel-Scheinwerfer" für London-Nacht
+    const spot = new THREE.SpotLight(0xffddaa, 0.4, 100, Math.PI / 6, 0.5, 1);
+    spot.position.set(0, 20, 0);
+    scene.add(spot);
+
+    // Input Events
+    const onKeyDown = function (event) {
+      switch (event.code) {
+        case 'ArrowUp':
+        case 'KeyW':
+          moveForward = true;
+          break;
+        case 'ArrowLeft':
+        case 'KeyA':
+          moveLeft = true;
+          break;
+        case 'ArrowDown':
+        case 'KeyS':
+          moveBackward = true;
+          break;
+        case 'ArrowRight':
+        case 'KeyD':
+          moveRight = true;
+          break;
+        case 'Space':
+          if (canJump === true) velocity.y += 8;
+          canJump = false;
+          break;
+      }
+    };
+
+    const onKeyUp = function (event) {
+      switch (event.code) {
+        case 'ArrowUp':
+        case 'KeyW':
+          moveForward = false;
+          break;
+        case 'ArrowLeft':
+        case 'KeyA':
+          moveLeft = false;
+          break;
+        case 'ArrowDown':
+        case 'KeyS':
+          moveBackward = false;
+          break;
+        case 'ArrowRight':
+        case 'KeyD':
+          moveRight = false;
+          break;
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown, false);
+    document.addEventListener('keyup', onKeyUp, false);
+
+    window.addEventListener('resize', onWindowResize);
+  }
+
+  function createBlockBuilding(cx, startY, cz, width, height, depth, color) {
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const mat = new THREE.MeshLambertMaterial({ color: color });
+
+    for (let y = startY; y < startY + height; y++) {
+      for (let x = cx; x < cx + width; x++) {
+        for (let z = cz; z < cz + depth; z++) {
+          const cube = new THREE.Mesh(geo, mat);
+          cube.position.set(x, y, z);
+          cube.castShadow = true;
+          cube.receiveShadow = true;
+          scene.add(cube);
+          objects.push(cube);
+        }
+      }
+    }
+  }
+
+  function createBigBenLike(cx, startY, cz) {
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const towerMat = new THREE.MeshLambertMaterial({ color: 0x996633 });
+    const clockMat = new THREE.MeshLambertMaterial({ color: 0xffffdd });
+
+    // Turm
+    for (let y = startY; y < startY + 16; y++) {
+      for (let x = cx - 2; x <= cx + 2; x++) {
+        for (let z = cz - 2; z <= cz + 2; z++) {
+          const cube = new THREE.Mesh(geo, towerMat);
+          cube.position.set(x, y, z);
+          scene.add(cube);
+          objects.push(cube);
+        }
+      }
+    }
+
+    // "Uhr" – helle Blöcke ringsum auf einer Ebene
+    const clockY = startY + 10;
+    for (let x = cx - 1; x <= cx + 1; x++) {
+      const cubeFront = new THREE.Mesh(geo, clockMat);
+      cubeFront.position.set(x, clockY, cz - 3);
+      scene.add(cubeFront);
+      objects.push(cubeFront);
+
+      const cubeBack = new THREE.Mesh(geo, clockMat);
+      cubeBack.position.set(x, clockY, cz + 3);
+      scene.add(cubeBack);
+      objects.push(cubeBack);
+    }
+    for (let z = cz - 1; z <= cz + 1; z++) {
+      const cubeLeft = new THREE.Mesh(geo, clockMat);
+      cubeLeft.position.set(cx - 3, clockY, z);
+      scene.add(cubeLeft);
+      objects.push(cubeLeft);
+
+      const cubeRight = new THREE.Mesh(geo, clockMat);
+      cubeRight.position.set(cx + 3, clockY, z);
+      scene.add(cubeRight);
+      objects.push(cubeRight);
+    }
+  }
+
+  function createNeonSign(x, y, z, w, h, color) {
+    const geo = new THREE.BoxGeometry(w, h, 0.3);
+    const mat = new THREE.MeshBasicMaterial({
+      color: color,
+      emissive: color,
+      emissiveIntensity: 1
+    });
+    const sign = new THREE.Mesh(geo, mat);
+    sign.position.set(x, y, z);
+    scene.add(sign);
+    objects.push(sign);
+  }
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const time = performance.now();
+    const delta = (time - prevTime) / 1000;
+
+    if (controls.isLocked) {
+      // Bewegung & Physik
+      velocity.x -= velocity.x * 10.0 * delta;
+      velocity.z -= velocity.z * 10.0 * delta;
+      velocity.y -= 9.8 * 5.0 * delta; // Gravitation
+
+      direction.z = Number(moveForward) - Number(moveBackward);
+      direction.x = Number(moveRight) - Number(moveLeft);
+      direction.normalize(); // wichtig, wenn beide Tasten gedrückt
+
+      const speed = 25.0;
+      if (moveForward || moveBackward) velocity.z -= direction.z * speed * delta;
+      if (moveLeft || moveRight) velocity.x -= direction.x * speed * delta;
+
+      // Position updaten
+      controls.moveRight(-velocity.x * delta);
+      controls.moveForward(-velocity.z * delta);
+
+      controls.getObject().position.y += velocity.y * delta;
+
+      // "Boden"-Kollision
+      if (controls.getObject().position.y < 2) {
+        velocity.y = 0;
+        controls.getObject().position.y = 2;
+        canJump = true;
+      }
+    }
+
+    prevTime = time;
+
+    renderer.render(scene, camera);
+  }
+</script>
+</body>
+</html>
